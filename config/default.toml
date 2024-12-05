@@ -1,0 +1,104 @@
+# Default configuration values
+app_env = "development"
+app_port = 8080
+log_level = "info"
+
+[server]
+host = "0.0.0.0"
+port = 8080
+public_url = "forge.dev"
+
+[environments]
+default_template = "nodejs"
+container_prefix = "forge"
+data_directory = "./data"
+
+[port_forwarding]
+enabled = true
+base_domain = "forge.dev"
+proxy_port = 8000
+https = true
+cert_path = "./certs"
+
+[templates]
+# Node.js development environment
+[templates.nodejs]
+name = "Node.js"
+description = "Node.js development environment"
+base_image = "node:18-alpine"
+exposed_ports = [3000, 9229]
+default_cmd = "npm run dev"
+env_vars = ["NODE_ENV=development"]
+
+# Python development environment
+[templates.python]
+name = "Python"
+description = "Python development environment"
+base_image = "python:3.11-slim"
+exposed_ports = [5000, 8888]
+default_cmd = "python app.py"
+env_vars = ["PYTHONUNBUFFERED=1"]
+
+# Go development environment
+[templates.golang]
+name = "Go"
+description = "Go development environment"
+base_image = "golang:1.20-alpine"
+exposed_ports = [8080]
+default_cmd = "go run main.go"
+env_vars = ["GO111MODULE=on"]
+
+# Web development environment
+[templates.web]
+name = "Web Development"
+description = "Web development with Node.js and common tools"
+base_image = "node:18-alpine"
+exposed_ports = [3000, 8080]
+default_cmd = "npm run dev"
+env_vars = ["NODE_ENV=development"]
+packages = ["npm", "git", "curl"]
+
+# API development environment
+[templates.api]
+name = "API Development"
+description = "API development with Express.js"
+base_image = "node:18-alpine"
+exposed_ports = [3000, 9229]
+default_cmd = "npm run dev"
+env_vars = ["NODE_ENV=development"]
+packages = ["npm", "git", "curl"]
+
+[monitoring]
+enabled = true
+metrics_port = 9090
+collect_interval_seconds = 10
+
+[logging]
+directory = "./logs"
+max_size_mb = 100
+max_files = 10
+format = "json"
+
+[database]
+url = "postgres://postgres:postgres@localhost:5432/forge_dev"
+
+[security]
+password_hash_rounds = 12
+session_timeout_minutes = 60
+mfa_code_length = 6
+mfa_code_expiry_seconds = 300
+cors_origins = ["http://localhost:3000"]
+allowed_hosts = ["localhost", "forge.dev"]
+
+[redis]
+url = "redis://localhost:6379"
+enabled = true
+
+[plugins]
+directory = "./plugins"
+allowed_types = ["environment", "tool", "theme"]
+
+[git]
+enabled = true
+default_branch = "main"
+cache_directory = "./git-cache"

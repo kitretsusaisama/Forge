@@ -1,0 +1,10 @@
+-- Create environments table
+CREATE TABLE IF NOT EXISTS environments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    env_type TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

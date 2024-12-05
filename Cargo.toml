@@ -1,0 +1,137 @@
+[package]
+name = "dev-env-manager"
+version = "0.1.0"
+edition = "2021"
+authors = ["Dev Environment Manager Team"]
+description = "A comprehensive development environment management system"
+
+[dependencies]
+# Core dependencies
+tokio = { version = "1.32", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+async-trait = "0.1"
+futures = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+secrecy = { version = "0.8", features = ["serde"] }
+base64 = "0.21"
+
+# Docker
+bollard = { version = "0.14", optional = true }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "macros", "sqlite"], optional = true }
+
+# HTTP Client
+reqwest = { version = "0.11", features = ["json"], optional = true }
+
+# CLI and Interactive UI
+clap = { version = "4.4.18", features = ["derive", "env"] }
+dialoguer = "0.11.0"
+indicatif = "0.17.7"
+console = "0.15.7"
+tui = { version = "0.19.0", features = ["crossterm"], optional = true }
+crossterm = { version = "0.27.0", optional = true }
+
+# Async runtime and utilities
+tokio-util = { version = "0.7", features = ["full"] }
+
+# Configuration and serialization
+toml = "0.8.8"
+json5 = "0.4.1"
+jsonschema = "0.17.1"
+json-patch = "0.3.0"
+serde_yaml = "0.9.25"
+dotenv = "0.15"
+config = "0.13"
+
+# Storage and Metrics
+rusqlite = { version = "0.30.0", features = ["bundled"] }
+metrics = { version = "0.21", optional = true }
+metrics-exporter-prometheus = { version = "0.12", optional = true }
+tokio-postgres = { version = "0.7", optional = true }
+prometheus = { version = "0.13", optional = true }
+
+# Container and orchestration
+shiplift = { version = "0.7", default-features = false, optional = true }
+oci-spec = { version = "0.6", optional = true }
+k8s-openapi = { version = "0.20.0", features = ["v1_28"], optional = true }
+kube = { version = "0.87.1", features = ["runtime", "derive"], optional = true }
+
+# Environment and system
+nix = { version = "0.27.0", optional = true }
+which = { version = "4.4" }
+home = { version = "0.5" }
+sysinfo = "0.30.5"
+users = { version = "0.11", optional = true }
+
+# Security and authentication
+argon2 = "0.5"
+jwt = "0.16"
+sha2 = "0.10"
+
+# Networking and HTTP
+hyper-tls = "0.5"
+trust-dns-resolver = { version = "0.23", optional = true }
+url = "2.4"
+
+# Rate limiting
+governor = "0.6"
+nonzero_ext = "0.3"
+
+# Additional dependencies
+dirs = "5.0"
+futures-util = "0.3"
+ignore = "0.4"
+lettre = "0.10"
+totp-rs = "5.0"
+base32 = "0.4"
+generic-array = "0.14"
+maxminddb = "0.23"
+ipnetwork = "0.20"
+lazy_static = "1.4"
+env_logger = "0.10"
+email_address = "0.2"
+qrcode = "0.12"
+
+[target.'cfg(unix)'.dependencies]
+users = { version = "0.11", optional = true }
+nix = { version = "0.27.0", optional = true }
+
+[features]
+default = ["docker", "database"]
+docker = ["bollard"]
+database = ["sqlx"]
+cloud = []
+monitoring = []
+containers = []
+kubernetes = []
+
+[dev-dependencies]
+tokio-test = "0.4"
+pretty_assertions = "1.4"
+test-case = "3.3"
+tempfile = "3.8"
+
+[[bin]]
+name = "forge"
+path = "src/main.rs"
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests.rs"
+harness = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.test]
+opt-level = 1
+debug = true

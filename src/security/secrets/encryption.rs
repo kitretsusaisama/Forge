@@ -4,30 +4,51 @@ use aes_gcm::{
 };
 use anyhow::{Context, Result};
 use secrecy::{Secret, ExposeSecret};
+use generic_array::GenericArray;
+use rand_core::OsRng;
+
+const NONCE_SIZE: usize = 12;
 
 pub struct Encryption {
-    cipher: Aes256Gcm,
+    key: Secret<String>,
 }
 
 impl Encryption {
     pub fn new(key: &Secret<String>) -> Result<Self> {
-        let key_bytes = key.expose_secret().as_bytes();
-        let key = Key::<Aes256Gcm>::from_slice(key_bytes);
+        Ok(Self { key: key.clone() })
+    }
+
+    pub fn encrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let mut nonce_bytes = [0u8; NONCE_SIZE];
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let key = GenericArray::from_slice(self.key.expose_secret());
         let cipher = Aes256Gcm::new(key);
-        Ok(Self { cipher })
-    }
-
-    pub fn encrypt(&self, data: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
-        let nonce = Nonce::from_slice(nonce);
-        self.cipher
+        
+        let ciphertext = cipher
             .encrypt(nonce, data)
-            .context("Failed to encrypt data")
+            .map_err(|_| anyhow::anyhow!("Encryption failed"))?;
+
+        let mut output = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
+        output.extend_from_slice(&nonce_bytes);
+        output.extend_from_slice(&ciphertext);
+        Ok(output)
     }
 
-    pub fn decrypt(&self, ciphertext: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
-        let nonce = Nonce::from_slice(nonce);
-        self.cipher
+    pub fn decrypt(&self, encrypted_data: &[u8]) -> Result<Vec<u8>> {
+        if encrypted_data.len() < NONCE_SIZE {
+            return Err(anyhow::anyhow!("Invalid encrypted data"));
+        }
+
+        let (nonce_bytes, ciphertext) = encrypted_data.split_at(NONCE_SIZE);
+        let nonce = Nonce::from_slice(nonce_bytes);
+        
+        let key = GenericArray::from_slice(self.key.expose_secret());
+        let cipher = Aes256Gcm::new(key);
+
+        cipher
             .decrypt(nonce, ciphertext)
-            .context("Failed to decrypt data")
+            .map_err(|_| anyhow::anyhow!("Decryption failed"))
     }
 }

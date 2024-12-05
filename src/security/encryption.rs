@@ -1,8 +1,6 @@
 use aes_gcm::{
     aead::{Aead, KeyInit},
-    Aes256Gcm, 
-    Key,
-    Nonce,
+    Aes256Gcm, Key, Nonce,
 };
 use generic_array::GenericArray;
 use rand::{RngCore, rngs::OsRng};
@@ -10,6 +8,9 @@ use base64::{engine::general_purpose, Engine as _};
 use anyhow::{Result, Context};
 use std::path::{Path, PathBuf};
 use secrecy::{ExposeSecret, Secret};
+use generic_array::typenum::U32;
+
+const NONCE_SIZE: usize = 12;
 
 /// Encryption configuration and management
 #[derive(Debug, Clone)]
@@ -31,12 +32,12 @@ impl SecretEncryptionManager {
     }
 
     /// Generate or retrieve encryption key
-    fn get_encryption_key(&self) -> Result<Secret<Vec<u8>>> {
+    fn get_encryption_key(&self) -> Result<Secret<[u8; 32]>> {
         // Check if key file exists
         if self.key_path.exists() {
             // Read existing key
             let key_content = std::fs::read(&self.key_path)?;
-            Ok(Secret::new(key_content))
+            Ok(Secret::new(key_content.try_into().expect("Invalid key length")))
         } else {
             // Generate new encryption key
             let mut key = [0u8; 32];
@@ -54,7 +55,7 @@ impl SecretEncryptionManager {
                 std::fs::set_permissions(&self.key_path, perms)?;
             }
 
-            Ok(Secret::new(key.to_vec()))
+            Ok(Secret::new(key))
         }
     }
 
@@ -62,47 +63,47 @@ impl SecretEncryptionManager {
     pub fn encrypt(&self, secret: &str) -> Result<String> {
         // Get encryption key
         let key = self.get_encryption_key()?;
-        let key = Key::from_slice(key.expose_secret());
-
-        // Generate random nonce
-        let mut nonce_bytes = [0u8; 12];
+        
+        let mut nonce_bytes = [0u8; NONCE_SIZE];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        // Create cipher
+        let key = GenericArray::from_slice(key.expose_secret());
         let cipher = Aes256Gcm::new(key);
-
-        // Encrypt the secret
-        let encrypted_data = cipher.encrypt(nonce, secret.as_bytes())
+        
+        let ciphertext = cipher
+            .encrypt(nonce, secret.as_bytes())
             .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
 
-        // Combine nonce and encrypted data, then base64 encode
-        let mut combined_data = nonce_bytes.to_vec();
-        combined_data.extend_from_slice(&encrypted_data);
+        let mut output = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
+        output.extend_from_slice(&nonce_bytes);
+        output.extend_from_slice(&ciphertext);
 
-        Ok(general_purpose::STANDARD.encode(&combined_data))
+        Ok(general_purpose::STANDARD.encode(&output))
     }
 
     /// Decrypt a secret value
     pub fn decrypt(&self, encrypted_secret: &str) -> Result<String> {
         // Get encryption key
         let key = self.get_encryption_key()?;
-        let key = Key::from_slice(key.expose_secret());
-
+        
         // Decode base64 encrypted data
         let combined_data = general_purpose::STANDARD
             .decode(encrypted_secret)
             .context("Invalid base64 encoding")?;
 
-        // Split nonce and encrypted data
-        let (nonce_bytes, encrypted_data) = combined_data.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
+        if combined_data.len() < NONCE_SIZE {
+            return Err(anyhow::anyhow!("Invalid encrypted data"));
+        }
 
-        // Create cipher
+        let (nonce_bytes, ciphertext) = combined_data.split_at(NONCE_SIZE);
+        let nonce = Nonce::from_slice(nonce_bytes);
+        
+        let key = GenericArray::from_slice(key.expose_secret());
         let cipher = Aes256Gcm::new(key);
 
-        // Decrypt the secret
-        let decrypted_data = cipher.decrypt(nonce, encrypted_data)
+        let decrypted_data = cipher
+            .decrypt(nonce, ciphertext)
             .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
 
         // Convert to string

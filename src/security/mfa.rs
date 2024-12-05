@@ -38,6 +38,31 @@ pub enum MfaMethod {
     RecoveryCode,   // Backup recovery codes
 }
 
+impl ToString for MfaMethod {
+    fn to_string(&self) -> String {
+        match self {
+            MfaMethod::Totp => "totp".to_string(),
+            MfaMethod::Email => "email".to_string(),
+            MfaMethod::Sms => "sms".to_string(),
+            MfaMethod::RecoveryCode => "recovery_code".to_string(),
+        }
+    }
+}
+
+impl std::str::FromStr for MfaMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "totp" => Ok(MfaMethod::Totp),
+            "email" => Ok(MfaMethod::Email),
+            "sms" => Ok(MfaMethod::Sms),
+            "recovery_code" => Ok(MfaMethod::RecoveryCode),
+            _ => Err(format!("Invalid MFA method: {}", s)),
+        }
+    }
+}
+
 /// Multi-Factor Authentication Manager
 pub struct MfaManager {
     /// Temporary storage for MFA codes

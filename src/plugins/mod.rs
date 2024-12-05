@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 /// Trait for environment detection plugins
@@ -91,9 +91,21 @@ pub struct PluginConfig {
 }
 
 /// Plugin trait for dynamic loading and execution
-pub trait Plugin: Send + Sync {
+pub trait Plugin: Send + Sync + Debug {
     /// Get plugin metadata
-    fn metadata(&self) -> &PluginMetadata;
+    fn id(&self) -> &str;
+
+    /// Get plugin name
+    fn name(&self) -> &str;
+
+    /// Get plugin description
+    fn description(&self) -> &str;
+
+    /// Get plugin version
+    fn version(&self) -> &str;
+
+    /// Clone the plugin
+    fn clone_box(&self) -> Box<dyn Plugin>;
 
     /// Initialize plugin
     fn initialize(&mut self, config: &PluginConfig) -> Result<()>;
@@ -108,26 +120,28 @@ pub trait Plugin: Send + Sync {
     fn as_any(&self) -> &dyn Any;
 }
 
+impl Clone for Box<dyn Plugin> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
 /// Plugin manager for dynamic plugin management
 pub struct PluginManager {
     /// Loaded plugins
-    plugins: Arc<Mutex<HashMap<Uuid, Box<dyn Plugin>>>>,
-
-    /// Plugin directory
-    plugin_dir: PathBuf,
+    plugins: Arc<RwLock<HashMap<String, Box<dyn Plugin>>>>,
 }
 
 impl PluginManager {
     /// Create a new plugin manager
-    pub fn new(plugin_dir: PathBuf) -> Self {
+    pub fn new() -> Self {
         Self {
-            plugins: Arc::new(Mutex::new(HashMap::new())),
-            plugin_dir,
+            plugins: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Load plugins from directory
-    pub fn load_plugins(&mut self) -> Result<()> {
+    pub fn load_plugins(&mut self, plugin_dir: PathBuf) -> Result<()> {
         // Ensure plugin directory exists
         std::fs::create_dir_all(&self.plugin_dir)?;
 
@@ -165,44 +179,46 @@ impl PluginManager {
 
     /// Register a plugin
     pub fn register_plugin(&mut self, plugin: Box<dyn Plugin>) -> Result<()> {
-        let mut plugins = self.plugins.lock().map_err(|_| 
-            anyhow::anyhow!("Failed to acquire plugin lock")
-        )?;
+        let mut plugins = self.plugins.write().unwrap();
 
-        let metadata = plugin.metadata();
-        plugins.insert(metadata.id, plugin);
+        let metadata = plugin.id();
+        plugins.insert(metadata.to_string(), plugin);
 
         Ok(())
     }
 
     /// Get a plugin by ID
-    pub fn get_plugin(&self, plugin_id: &Uuid) -> Option<Arc<Box<dyn Plugin>>> {
-        let plugins = self.plugins.lock().ok()?;
+    pub fn get_plugin(&self, plugin_id: &str) -> Option<Arc<Box<dyn Plugin>>> {
+        let plugins = self.plugins.read().unwrap();
         plugins.get(plugin_id).cloned().map(Arc::new)
     }
 
     /// List all loaded plugins
     pub fn list_plugins(&self) -> Result<Vec<PluginMetadata>> {
-        let plugins = self.plugins.lock().map_err(|_| 
-            anyhow::anyhow!("Failed to acquire plugin lock")
-        )?;
+        let plugins = self.plugins.read().unwrap();
 
         Ok(plugins
             .values()
-            .map(|plugin| plugin.metadata().clone())
+            .map(|plugin| PluginMetadata {
+                id: Uuid::new_v4(),
+                name: plugin.name().to_string(),
+                plugin_type: PluginType::CustomTool,
+                version: plugin.version().to_string(),
+                author: "Unknown".to_string(),
+                description: plugin.description().to_string(),
+                path: PathBuf::from(""),
+            })
             .collect())
     }
 
     /// Execute a plugin action
     pub fn execute_plugin(
         &self, 
-        plugin_id: &Uuid, 
+        plugin_id: &str, 
         action: &str, 
         args: &[String]
     ) -> Result<String> {
-        let plugins = self.plugins.lock().map_err(|_| 
-            anyhow::anyhow!("Failed to acquire plugin lock")
-        )?;
+        let plugins = self.plugins.read().unwrap();
 
         let plugin = plugins.get(plugin_id)
             .context("Plugin not found")?;
@@ -212,9 +228,7 @@ impl PluginManager {
 
     /// Unload and cleanup plugins
     pub fn unload_plugins(&mut self) -> Result<()> {
-        let mut plugins = self.plugins.lock().map_err(|_| 
-            anyhow::anyhow!("Failed to acquire plugin lock")
-        )?;
+        let mut plugins = self.plugins.write().unwrap();
 
         for plugin in plugins.values_mut() {
             plugin.cleanup()?;
@@ -235,7 +249,7 @@ impl EnvironmentPluginManager {
     pub fn new(plugin_dir: PathBuf) -> Self {
         Self { 
             plugins: Vec::new(), 
-            plugin_manager: PluginManager::new(plugin_dir)
+            plugin_manager: PluginManager::new()
         }
     }
 
@@ -269,7 +283,7 @@ impl EnvironmentPluginManager {
 
     /// Load plugins from directory
     pub fn load_plugins(&mut self) -> Result<()> {
-        self.plugin_manager.load_plugins()
+        self.plugin_manager.load_plugins(PathBuf::from(""))
     }
 
     /// Register a plugin
@@ -278,7 +292,7 @@ impl EnvironmentPluginManager {
     }
 
     /// Get a plugin by ID
-    pub fn get_plugin(&self, plugin_id: &Uuid) -> Option<Arc<Box<dyn Plugin>>> {
+    pub fn get_plugin(&self, plugin_id: &str) -> Option<Arc<Box<dyn Plugin>>> {
         self.plugin_manager.get_plugin(plugin_id)
     }
 
@@ -290,7 +304,7 @@ impl EnvironmentPluginManager {
     /// Execute a plugin action
     pub fn execute_plugin_manager(
         &self, 
-        plugin_id: &Uuid, 
+        plugin_id: &str, 
         action: &str, 
         args: &[String]
     ) -> Result<String> {

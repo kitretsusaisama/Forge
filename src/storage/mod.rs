@@ -246,6 +246,17 @@ impl StorageManager {
     }
 }
 
+impl Environment {
+    pub fn new(name: String, path: PathBuf) -> Result<Self> {
+        Ok(Environment {
+            name,
+            path,
+            plugin_metadata: HashMap::new(),
+            port_forwards: Vec::new(),
+        })
+    }
+}
+
 // Migrations for SQLite database
 #[cfg(test)]
 mod tests {

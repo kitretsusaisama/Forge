@@ -25,7 +25,6 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum CredentialType {
     Database,
-    CloudProvider,
     APIKey,
     SSHKey,
     Other,

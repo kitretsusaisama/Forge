@@ -97,26 +97,19 @@ impl ConfigParser {
         let schema_content = fs::read_to_string(schema_path)
             .context("Failed to read JSON schema")?;
         
-        let schema = jsonschema::JSONSchema::from_string(&schema_content)
-            .context("Invalid JSON schema")?;
-        
-        // Convert config to JSON value
-        let config_value = serde_json::to_value(config)
-            .context("Failed to convert config to JSON")?;
-        
-        // Validate against schema
-        schema.validate(&config_value)
-            .map_err(|errors| {
-                let error_messages: Vec<String> = errors
-                    .map(|e| e.to_string())
-                    .collect();
-                
-                anyhow::anyhow!(
-                    "Configuration validation failed:\n{}",
-                    error_messages.join("\n")
-                )
-            })?;
-        
+        Self::validate_schema(&schema_content, &serde_json::to_string(config).unwrap())
+    }
+
+    pub fn validate_schema(&self, schema_content: &str, config_content: &str) -> Result<()> {
+        let schema: serde_json::Value = serde_json::from_str(schema_content)?;
+        let config: serde_json::Value = serde_json::from_str(config_content)?;
+
+        let schema = jsonschema::JSONSchema::compile(&schema)
+            .map_err(|e| anyhow::anyhow!("Failed to compile schema: {}", e))?;
+
+        schema.validate(&config)
+            .map_err(|e| anyhow::anyhow!("Config validation failed: {:?}", e))?;
+
         Ok(())
     }
 

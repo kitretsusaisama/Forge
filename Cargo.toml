@@ -8,14 +8,29 @@ description = "A comprehensive development environment management system"
 [dependencies]
 # Core dependencies
 tokio = { version = "1.32", features = ["full"] }
-anyhow = "1.0"
+anyhow = { version = "1.0", features = ["backtrace"] }
 thiserror = "1.0"
 async-trait = "0.1"
 futures = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-secrecy = { version = "0.8", features = ["serde"] }
+secrecy = { version = "0.8", features = ["serde", "alloc"] }
 base64 = "0.21"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+time = { version = "0.3", features = ["serde"] }
+rand = "0.8"
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true }
+directories = "5.0"
+hyper = { version = "0.14", features = ["full"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+aes-gcm = "0.10"
+generic-array = "0.14"
+lazy_static = "1.4"
+maxminddb = "0.23"
+env_logger = "0.10"
+qrcode = "0.12"
+
 
 # Docker
 bollard = { version = "0.14", optional = true }
@@ -24,7 +39,7 @@ bollard = { version = "0.14", optional = true }
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "macros", "sqlite"], optional = true }
 
 # HTTP Client
-reqwest = { version = "0.11", features = ["json"], optional = true }
+reqwest = { version = "0.11", features = ["json"] }
 
 # CLI and Interactive UI
 clap = { version = "4.4.18", features = ["derive", "env"] }
@@ -56,15 +71,13 @@ prometheus = { version = "0.13", optional = true }
 # Container and orchestration
 shiplift = { version = "0.7", default-features = false, optional = true }
 oci-spec = { version = "0.6", optional = true }
-k8s-openapi = { version = "0.20.0", features = ["v1_28"], optional = true }
-kube = { version = "0.87.1", features = ["runtime", "derive"], optional = true }
 
 # Environment and system
-nix = { version = "0.27.0", optional = true }
 which = { version = "4.4" }
 home = { version = "0.5" }
 sysinfo = "0.30.5"
 users = { version = "0.11", optional = true }
+winapi = { version = "0.3.9", features = ["winerror"] }
 
 # Security and authentication
 argon2 = "0.5"
@@ -73,40 +86,38 @@ sha2 = "0.10"
 
 # Networking and HTTP
 hyper-tls = "0.5"
-trust-dns-resolver = { version = "0.23", optional = true }
 url = "2.4"
 
 # Rate limiting
 governor = "0.6"
 nonzero_ext = "0.3"
 
+# Email
+lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls", "builder"] }
+email_address = "0.2"
+
 # Additional dependencies
 dirs = "5.0"
 futures-util = "0.3"
 ignore = "0.4"
-lettre = "0.10"
 totp-rs = "5.0"
 base32 = "0.4"
-generic-array = "0.14"
-maxminddb = "0.23"
-ipnetwork = "0.20"
-lazy_static = "1.4"
-env_logger = "0.10"
-email_address = "0.2"
-qrcode = "0.12"
+
+[features]
+default = ["containers", "monitoring", "distributed-tracing"]
+ui = ["dep:tui", "dep:crossterm"]
+metrics = ["dep:metrics", "dep:metrics-exporter-prometheus", "dep:prometheus"]
+containers = ["docker"]
+docker = ["bollard", "oci-spec"]
+monitoring = ["metrics"]
+ml-performance = []
+distributed-tracing = ["tracing", "tracing-subscriber"]
+nix = ["dep:nix"]
+flox = []
 
 [target.'cfg(unix)'.dependencies]
 users = { version = "0.11", optional = true }
 nix = { version = "0.27.0", optional = true }
-
-[features]
-default = ["docker", "database"]
-docker = ["bollard"]
-database = ["sqlx"]
-cloud = []
-monitoring = []
-containers = []
-kubernetes = []
 
 [dev-dependencies]
 tokio-test = "0.4"

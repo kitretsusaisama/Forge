@@ -1,7 +1,7 @@
 use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use chrono::{DateTime, Duration, Utc, serde::duration};
 use hyper::{
     Body, 
     Client, 
@@ -66,6 +66,7 @@ pub enum AuthenticationMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfiguration {
     pub max_retries: u8,
+    #[serde(with = "duration")]
     pub base_delay: Duration,
     pub backoff_strategy: BackoffStrategy,
 }
@@ -79,19 +80,20 @@ pub enum BackoffStrategy {
 }
 
 /// Rate Limiting Configuration
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RateLimiter {
     /// Maximum requests per time window
     max_requests: u32,
     
     /// Time window for rate limiting
+    #[serde(with = "duration")]
     time_window: Duration,
     
     /// Current request count
     current_requests: u32,
     
     /// Last reset timestamp
-    last_reset: std::time::Instant,
+    last_reset: DateTime<Utc>,
 }
 
 impl RateLimiter {
@@ -100,16 +102,16 @@ impl RateLimiter {
             max_requests,
             time_window,
             current_requests: 0,
-            last_reset: std::time::Instant::now(),
+            last_reset: Utc::now(),
         }
     }
 
     /// Check if request is allowed
     pub fn check_request(&mut self) -> bool {
         // Reset if time window has passed
-        if self.last_reset.elapsed() > self.time_window {
+        if Utc::now().signed_duration_since(self.last_reset).num_seconds() as u64 > self.time_window.num_seconds() {
             self.current_requests = 0;
-            self.last_reset = std::time::Instant::now();
+            self.last_reset = Utc::now();
         }
 
         if self.current_requests < self.max_requests {
@@ -143,13 +145,15 @@ pub struct EndpointMetrics {
     failed_requests: u64,
     
     /// Average response time
+    #[serde(with = "duration")]
     avg_response_time: Duration,
     
     /// Peak response time
+    #[serde(with = "duration")]
     peak_response_time: Duration,
     
     /// Last request timestamp
-    last_request_time: Option<Instant>,
+    last_request_time: Option<DateTime<Utc>>,
 }
 
 /// Global performance statistics
@@ -196,9 +200,9 @@ impl APIPerformanceTracker {
                 total_requests: 0,
                 successful_requests: 0,
                 failed_requests: 0,
-                avg_response_time: Duration::from_secs(0),
-                peak_response_time: Duration::from_secs(0),
-                last_request_time: Some(Instant::now()),
+                avg_response_time: Duration::zero(),
+                peak_response_time: Duration::zero(),
+                last_request_time: Some(Utc::now()),
             });
 
         metrics.total_requests += 1;
@@ -207,11 +211,11 @@ impl APIPerformanceTracker {
             metrics.successful_requests += 1;
             
             // Update average response time
-            metrics.avg_response_time = Duration::from_secs_f64(
-                (metrics.avg_response_time.as_secs_f64() * (metrics.successful_requests - 1) as f64 
-                 + response_time.as_secs_f64()) 
+            metrics.avg_response_time = Duration::from_std(
+                (metrics.avg_response_time.to_std().as_secs_f64() * (metrics.successful_requests - 1) as f64 
+                 + response_time.to_std().as_secs_f64()) 
                 / metrics.successful_requests as f64
-            );
+            ).unwrap();
 
             // Update peak response time
             if response_time > metrics.peak_response_time {
@@ -221,7 +225,7 @@ impl APIPerformanceTracker {
             metrics.failed_requests += 1;
         }
 
-        metrics.last_request_time = Some(Instant::now());
+        metrics.last_request_time = Some(Utc::now());
 
         // Update global statistics
         self.global_stats.total_requests += 1;
@@ -249,7 +253,7 @@ impl APIPerformanceTracker {
             }
 
             // Slow response time recommendation
-            if metrics.avg_response_time > Duration::from_millis(500) {
+            if metrics.avg_response_time.num_milliseconds() > 500 {
                 recommendations.push(PerformanceRecommendation {
                     endpoint: endpoint.clone(),
                     recommendation_type: RecommendationType::SlowResponseTime,
@@ -305,7 +309,7 @@ impl APIManager {
         let client = Client::builder().build::<_, hyper::Body>(https);
 
         Self {
-            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(100, Duration::from_secs(60)))),
+            rate_limiter: Arc::new(Mutex::new(RateLimiter::new(100, Duration::seconds(60)))),
             endpoints: Arc::new(RwLock::new(HashMap::new())),
             http_client: client,
             performance_tracker: Arc::new(Mutex::new(APIPerformanceTracker::new())),
@@ -375,9 +379,9 @@ impl APIManager {
         };
 
         // Execute request with retry mechanism
-        let start_time = Instant::now();
-        let response = self.execute_with_retry(request, &endpoint.retry_config).await?;
-        let response_time = start_time.elapsed();
+        let start_time = Utc::now();
+        let response = self.execute_with_retry(request.try_clone().unwrap(), &endpoint.retry_config).await?;
+        let response_time = Utc::now().signed_duration_since(start_time);
 
         // Record request performance
         let mut performance_tracker = self.performance_tracker.lock().await;
@@ -389,49 +393,43 @@ impl APIManager {
     /// Execute request with retry mechanism
     async fn execute_with_retry(
         &self, 
-        request: Request<Body>, 
+        mut request: Request<Body>, 
         retry_config: &RetryConfiguration
     ) -> Result<Response<Body>> {
+        let mut attempt = 0;
         let mut last_error = None;
 
-        for attempt in 0..=retry_config.max_retries {
+        while attempt < retry_config.max_retries {
             match self.http_client.request(request.clone()).await {
                 Ok(response) => {
-                    // Successful response
-                    if response.status().is_success() {
+                    if !retry_config.should_retry_status(response.status()) {
                         return Ok(response);
                     }
-                    
-                    // Handle specific status codes
-                    match response.status() {
-                        StatusCode::TOO_MANY_REQUESTS => {
-                            // Exponential backoff for rate limiting
-                            tokio::time::sleep(Duration::from_secs(2u64.pow(attempt as u32))).await;
-                            continue;
-                        },
-                        _ => return Err(anyhow::anyhow!("Request failed with status: {}", response.status())),
-                    }
-                },
-                Err(e) => {
-                    last_error = Some(e);
-                    
-                    // Apply backoff strategy
-                    let delay = match retry_config.backoff_strategy {
-                        BackoffStrategy::Linear => retry_config.base_delay * (attempt + 1) as u32,
-                        BackoffStrategy::Exponential => retry_config.base_delay * 2u32.pow(attempt as u32),
-                        BackoffStrategy::Constant => retry_config.base_delay,
-                    };
-
-                    tokio::time::sleep(delay).await;
                 }
+                Err(err) => {
+                    last_error = Some(err);
+                }
+            }
+
+            attempt += 1;
+            if attempt < retry_config.max_retries {
+                let delay = match retry_config.backoff_strategy {
+                    BackoffStrategy::Linear => {
+                        Duration::from_secs((attempt + 1) as u64)
+                            * retry_config.base_delay
+                    }
+                    BackoffStrategy::Exponential => {
+                        Duration::from_secs(2u64.pow(attempt as u32))
+                            * retry_config.base_delay
+                    }
+                    BackoffStrategy::Constant => retry_config.base_delay,
+                };
+
+                tokio::time::sleep(delay).await;
             }
         }
 
-        Err(anyhow::anyhow!(
-            "Failed after {} retries. Last error: {:?}", 
-            retry_config.max_retries, 
-            last_error
-        ))
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Request failed")))
     }
 
     /// WebSocket connection management
@@ -475,7 +473,7 @@ mod tests {
             authentication: Some(AuthenticationMethod::Bearer("test_token".to_string())),
             retry_config: RetryConfiguration {
                 max_retries: 3,
-                base_delay: Duration::from_millis(100),
+                base_delay: Duration::milliseconds(100),
                 backoff_strategy: BackoffStrategy::Exponential,
             },
         };
@@ -485,7 +483,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rate_limiter() {
-        let mut rate_limiter = RateLimiter::new(5, Duration::from_secs(1));
+        let mut rate_limiter = RateLimiter::new(5, Duration::seconds(1));
 
         // Allow first 5 requests
         for _ in 0..5 {
@@ -504,13 +502,13 @@ mod tests {
         tracker.record_request(
             "/test", 
             true, 
-            Duration::from_millis(100)
+            Duration::milliseconds(100)
         );
 
         tracker.record_request(
             "/test", 
             false, 
-            Duration::from_millis(200)
+            Duration::milliseconds(200)
         );
 
         // Analyze performance
@@ -527,7 +525,7 @@ mod tests {
             tracker.record_request(
                 "/slow-endpoint", 
                 false, 
-                Duration::from_millis(600)
+                Duration::milliseconds(600)
             );
         }
 

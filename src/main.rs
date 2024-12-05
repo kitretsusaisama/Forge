@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use chrono::Duration;
 use anyhow::{Result, Context};
 use tracing::info;
 use tracing_subscriber;
@@ -35,12 +35,7 @@ use security::{
     SecretsManager,
     RecoveryConfig,
     validate_password,
-    CloudSyncConfig,
-    CloudProvider,
-    CloudAuthMethod,
-    CloudProviderType,
 };
-
 use templates::TemplateManager;
 use agents::{AgentOrchestrator, OptimizationAgent, SecurityAgent};
 use api::{APIManager, APIEndpoint, HttpMethod, RetryConfiguration, BackoffStrategy};
@@ -153,16 +148,6 @@ enum Commands {
         #[command(subcommand)]
         command: RecoveryCommand,
     },
-    /// Manage cloud secret synchronization
-    CloudSync {
-        #[command(subcommand)]
-        command: CloudSyncCommand,
-    },
-    /// Manage cloud provider encryption keys
-    CloudKeys {
-        #[command(subcommand)]
-        command: CloudKeysCommand,
-    },
 }
 
 /// User management subcommands
@@ -230,99 +215,6 @@ enum RecoveryCommand {
     Revoke,
 }
 
-/// Cloud synchronization subcommands
-#[derive(Subcommand)]
-enum CloudSyncCommand {
-    /// Configure cloud synchronization
-    Configure {
-        /// Cloud provider (aws, gcp, azure, custom)
-        #[arg(long)]
-        provider: String,
-
-        /// Cloud service endpoint
-        #[arg(long)]
-        endpoint: String,
-
-        /// Authentication method (oauth, service-account, api-key)
-        #[arg(long)]
-        auth_method: String,
-
-        /// Client ID for OAuth
-        #[arg(long)]
-        client_id: Option<String>,
-
-        /// Client secret for OAuth
-        #[arg(long)]
-        client_secret: Option<String>,
-
-        /// API key for authentication
-        #[arg(long)]
-        api_key: Option<String>,
-
-        /// Path to service account key file
-        #[arg(long)]
-        service_account_key: Option<String>,
-
-        /// Enable automatic synchronization
-        #[arg(long)]
-        auto_sync: bool,
-
-        /// Sync frequency in minutes
-        #[arg(long, default_value = "30")]
-        sync_frequency: u32,
-    },
-
-    /// Synchronize secrets with cloud provider
-    Sync,
-
-    /// View recent synchronization history
-    History {
-        /// Number of recent sync entries to display
-        #[arg(long, default_value = "10")]
-        limit: usize,
-    },
-}
-
-/// Cloud key management subcommands
-#[derive(Subcommand)]
-enum CloudKeysCommand {
-    /// Generate a new encryption key for a cloud provider
-    Generate {
-        /// Cloud provider (aws, gcp, azure)
-        #[arg(long)]
-        provider: String,
-    },
-
-    /// Rotate encryption key for a cloud provider
-    Rotate {
-        /// Cloud provider (aws, gcp, azure)
-        #[arg(long)]
-        provider: String,
-    },
-
-    /// List all stored cloud provider encryption keys
-    List,
-
-    /// Retrieve details about a specific encryption key
-    Describe {
-        /// Key identifier
-        #[arg(long)]
-        key_id: String,
-    },
-}
-
-// New Machine Learning Performance Prediction Module
-#[cfg(feature = "ml-performance")]
-mod ml {
-    pub mod performance_predictor;
-}
-
-// New Distributed Tracing Module
-#[cfg(feature = "distributed-tracing")]
-mod tracing {
-    pub mod distributed_tracer;
-}
-
 fn get_project_dirs() -> Result<directories::ProjectDirs> {
     directories::ProjectDirs::from("com", "devenv", "forge")
         .context("Failed to get project directories")
@@ -340,38 +232,47 @@ async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&settings.log_level))
         .init();
 
+    // Initialize security service configuration
+    use std::time::Duration;
+    use crate::security::{SecurityConfig, MfaMethod};
+    use std::collections::HashMap;
+
+    let security_config = SecurityConfig {
+        enabled: true,
+        password_min_length: 8,
+        require_special_chars: true,
+        require_numbers: true,
+        require_uppercase: true,
+        require_lowercase: true,
+        max_failed_attempts: 5,
+        lockout_duration: Duration::from_secs(1800), // 30 minutes
+        password_expiry_days: 90,
+        session_timeout: Duration::from_secs(settings.security.session_timeout_minutes * 60),
+        mfa_code_length: settings.security.mfa_code_length as u8,
+        mfa_code_expiry: Duration::from_secs(settings.security.mfa_code_expiry_seconds),
+        allowed_mfa_methods: vec![MfaMethod::Totp, MfaMethod::Email],
+        geolocation_policies: HashMap::new(),
+        jwt_secret: settings.security_keys().0.clone(),
+        encryption_key: settings.security_keys().1.clone(),
+        mfa_secret_key: settings.security_keys().2.clone(),
+    };
+
     // Initialize security service with configuration
-    let security_service = AdvancedSecurityService::new(SecurityConfig {
-        jwt_secret: settings.security_keys().0,
-        encryption_key: settings.security_keys().1,
-        mfa_secret_key: settings.security_keys().2,
-        password_hash_rounds: settings.security.password_hash_rounds,
-        session_timeout: Duration::minutes(settings.security.session_timeout_minutes as i64),
-        mfa_code_length: settings.security.mfa_code_length,
-        mfa_code_expiry: Duration::seconds(settings.security.mfa_code_expiry_seconds as i64),
-    })?;
+    let security_service = AdvancedSecurityService::new(
+        std::path::Path::new(&settings.base_dir),
+        security_config
+    )?;
 
     // Initialize email service
     let (smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from) = settings.email_credentials();
-    let email_service = EmailService::new(
-        smtp_host,
-        smtp_port.parse()?,
-        smtp_user,
-        smtp_pass,
-        smtp_from,
-    )?;
-
-    // Initialize AWS cloud provider if configured
-    let (aws_key, aws_secret, aws_region) = settings.aws_credentials();
-    let cloud_provider = if !aws_key.is_empty() {
-        Some(Arc::new(AwsCloudProvider::new(AwsConfig {
-            access_key_id: aws_key,
-            secret_access_key: aws_secret,
-            region: aws_region,
-        })) as Arc<dyn CloudProvider>)
-    } else {
-        None
+    let email_config = EmailConfig {
+        smtp_host: smtp_host.to_string(),
+        smtp_port,
+        smtp_user: smtp_user.to_string(),
+        smtp_pass: smtp_pass.to_string(),
+        smtp_from: smtp_from.to_string(),
     };
+    let email_service = EmailService::new(email_config)?;
 
     // Initialize geolocation service
     let (geo_api_key, geo_api_url) = settings.geolocation_config();
@@ -600,11 +501,10 @@ async fn main() -> Result<()> {
         } => {
             let email_config = EmailConfig {
                 smtp_host: smtp_host.to_string(),
-                smtp_port: *smtp_port,
-                sender_email: sender_email.to_string(),
-                use_tls: true,
-                username: username.clone(),
-                password: password.clone(),
+                smtp_port,
+                smtp_user: username.clone().unwrap_or_default(),
+                smtp_pass: password.clone().unwrap_or_default(),
+                smtp_from: sender_email.to_string(),
             };
 
             // Validate and save email configuration
@@ -669,207 +569,6 @@ async fn main() -> Result<()> {
                 },
             }
         },
-        Commands::CloudSync { command } => {
-            match command {
-                CloudSyncCommand::Configure { 
-                    provider, 
-                    endpoint, 
-                    auth_method,
-                    client_id,
-                    client_secret,
-                    api_key,
-                    service_account_key,
-                    auto_sync,
-                    sync_frequency,
-                } => {
-                    // Parse cloud provider
-                    let cloud_provider = match provider.to_lowercase().as_str() {
-                        "aws" => CloudProvider::AWS,
-                        "gcp" => CloudProvider::GCP,
-                        "azure" => CloudProvider::Azure,
-                        _ => CloudProvider::Custom(provider.clone()),
-                    };
-
-                    // Parse authentication method
-                    let auth_method = match auth_method.to_lowercase().as_str() {
-                        "oauth" => CloudAuthMethod::OAuth {
-                            client_id: client_id.clone().unwrap_or_default(),
-                            client_secret: client_secret.clone().unwrap_or_default(),
-                        },
-                        "api-key" => CloudAuthMethod::ApiKey {
-                            api_key: api_key.clone().unwrap_or_default(),
-                        },
-                        "service-account" => CloudAuthMethod::ServiceAccount {
-                            key_path: service_account_key.clone()
-                                .unwrap_or_else(|| "service_account.json".to_string()),
-                        },
-                        _ => return Err(anyhow::anyhow!("Invalid authentication method")),
-                    };
-
-                    // Update cloud sync configuration
-                    let cloud_sync_config = CloudSyncConfig {
-                        provider: cloud_provider,
-                        endpoint: endpoint.clone(),
-                        auth_method,
-                        sync_frequency: *sync_frequency,
-                        auto_sync: *auto_sync,
-                    };
-
-                    // TODO: Implement secure configuration storage
-                    println!("Cloud sync configuration updated.");
-                },
-
-                CloudSyncCommand::Sync => {
-                    // Retrieve secrets for synchronization
-                    let secrets = security_service
-                        .secrets_manager
-                        .get_all_secrets()?;
-
-                    // Perform cloud synchronization
-                    let sync_metadata = security_service
-                        .synchronize_secrets(&secrets)
-                        .await?;
-
-                    println!("Secrets synchronized successfully:");
-                    println!("Sync ID: {}", sync_metadata.sync_id);
-                    println!("Timestamp: {}", sync_metadata.timestamp);
-                    println!("Secrets Count: {}", sync_metadata.secrets_count);
-                    println!("Status: {:?}", sync_metadata.status);
-                },
-
-                CloudSyncCommand::History { limit } => {
-                    // Retrieve recent sync history
-                    let sync_history = security_service
-                        .get_recent_sync_history(*limit)?;
-
-                    println!("Recent Sync History:");
-                    for (i, entry) in sync_history.iter().enumerate() {
-                        println!("{}. Sync ID: {}", i + 1, entry.sync_id);
-                        println!("   Timestamp: {}", entry.timestamp);
-                        println!("   Secrets Count: {}", entry.secrets_count);
-                        println!("   Status: {:?}", entry.status);
-                        println!();
-                    }
-                },
-            }
-        },
-        Commands::CloudKeys { command } => {
-            match command {
-                CloudKeysCommand::Generate { provider } => {
-                    // Parse cloud provider
-                    let cloud_provider = match provider.to_lowercase().as_str() {
-                        "aws" => CloudProviderType::AWS,
-                        "gcp" => CloudProviderType::GCP,
-                        "azure" => CloudProviderType::Azure,
-                        _ => return Err(anyhow::anyhow!("Unsupported cloud provider")),
-                    };
-
-                    // Create key manager
-                    let key_manager = security_service.create_cloud_key_manager()?;
-
-                    // Generate key
-                    let key = key_manager.generate_key(&cloud_provider)?;
-
-                    println!("New encryption key generated for {} provider", provider);
-                    println!("Key Length: {} bytes", key.len());
-                },
-
-                CloudKeysCommand::Rotate { provider } => {
-                    // Parse cloud provider
-                    let cloud_provider = match provider.to_lowercase().as_str() {
-                        "aws" => CloudProviderType::AWS,
-                        "gcp" => CloudProviderType::GCP,
-                        "azure" => CloudProviderType::Azure,
-                        _ => return Err(anyhow::anyhow!("Unsupported cloud provider")),
-                    };
-
-                    // Rotate key
-                    let key_id = security_service
-                        .rotate_cloud_provider_key(cloud_provider)
-                        .await?;
-
-                    println!("Encryption key rotated for {} provider", provider);
-                    println!("New Key ID: {}", key_id);
-                },
-
-                CloudKeysCommand::List => {
-                    // List all keys
-                    let keys = security_service.list_cloud_provider_keys()?;
-
-                    if keys.is_empty() {
-                        println!("No cloud provider encryption keys found.");
-                    } else {
-                        println!("Cloud Provider Encryption Keys:");
-                        for key in keys {
-                            println!("- {}", key);
-                        }
-                    }
-                },
-
-                CloudKeysCommand::Describe { key_id } => {
-                    // Create key manager
-                    let key_manager = security_service.create_cloud_key_manager()?;
-
-                    // Retrieve key details
-                    let key = key_manager.retrieve_key(key_id)?;
-
-                    println!("Key Details:");
-                    println!("Key ID: {}", key_id);
-                    println!("Key Length: {} bytes", key.len());
-                },
-            }
-        },
-    }
-
-    // Initialize Performance Predictor if ML feature is enabled
-    #[cfg(feature = "ml-performance")]
-    {
-        let ml_config = ml::performance_predictor::PerformancePredictorConfig {
-            history_window: 100,
-            prediction_horizon: 10,
-            model_type: ml::performance_predictor::ModelType::LinearRegression,
-        };
-        let mut performance_predictor = ml::performance_predictor::PerformancePredictor::new(ml_config);
-        
-        // Example: Record some initial performance data
-        performance_predictor.record_performance(
-            ml::performance_predictor::PerformanceDataPoint {
-                features: vec![1.0, 2.0, 3.0],
-                target: 0.5,
-            }
-        )?;
-        
-        performance_predictor.train_model()?;
-    }
-
-    // Initialize Distributed Tracer if tracing feature is enabled
-    #[cfg(feature = "distributed-tracing")]
-    {
-        let tracing_config = tracing::distributed_tracer::DistributedTracingConfig {
-            enabled: true,
-            sampling_rate: 1.0,
-            max_trace_duration: std::time::Duration::from_secs(10),
-            storage: tracing::distributed_tracer::TraceStorageConfig {
-                storage_type: tracing::distributed_tracer::StorageType::InMemory,
-                max_traces: 100,
-                retention_period: std::time::Duration::from_secs(3600),
-            },
-        };
-        let mut distributed_tracer = tracing::distributed_tracer::DistributedTracer::new(tracing_config);
-        
-        // Example: Start and end a trace
-        let trace_id = distributed_tracer.start_trace("main_initialization", None);
-        let span_id = distributed_tracer.start_span(trace_id, "module_setup").unwrap();
-        
-        // Simulate some work
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        
-        distributed_tracer.end_span(trace_id, span_id)?;
-        distributed_tracer.end_trace(trace_id)?;
-        
-        // Analyze traces
-        let performance_insights = distributed_tracer.analyze_traces();
-        println!("Performance Insights: {:?}", performance_insights);
     }
 
     // Initialize template manager

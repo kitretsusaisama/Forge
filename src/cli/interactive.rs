@@ -132,8 +132,6 @@ impl InteractiveConfigWizard {
             "Code Formatting",
             "Linting",
             "Testing Framework",
-            "CI/CD Integration",
-            "Docker Support",
             "Custom Configuration"
         ];
 
@@ -164,18 +162,6 @@ impl InteractiveConfigWizard {
                         "frameworks": ["cargo test", "pytest"]
                     });
                 },
-                "CI/CD Integration" => {
-                    advanced_config["cicd"] = serde_json::json!({
-                        "enabled": true,
-                        "providers": ["GitHub Actions", "GitLab CI"]
-                    });
-                },
-                "Docker Support" => {
-                    advanced_config["containerization"] = serde_json::json!({
-                        "enabled": true,
-                        "dockerfile_template": "default"
-                    });
-                },
                 "Custom Configuration" => {
                     let custom_config: String = Input::with_theme(&ColorfulTheme::default())
                         .with_prompt("Enter custom configuration (JSON)")
@@ -195,8 +181,6 @@ impl InteractiveConfigWizard {
     pub fn plugin_installation_wizard() -> Result<PluginInstallParams> {
         let plugin_types = vec![
             PluginType::IDE,
-            PluginType::GitProvider,
-            PluginType::CloudProvider,
             PluginType::BuildSystem,
             PluginType::CustomTool
         ];
@@ -226,62 +210,6 @@ impl InteractiveConfigWizard {
             plugin_type: plugin_types[type_selection],
             source,
         })
-    }
-
-    /// Interactive environment migration wizard
-    pub fn environment_migration_wizard() -> Result<()> {
-        println!("🔄 Environment Migration Wizard");
-
-        let migration_types = vec![
-            "Local to Cloud",
-            "Cloud to Local",
-            "Between Cloud Providers",
-            "Version Upgrade"
-        ];
-
-        let migration_type = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("Select migration type")
-            .items(&migration_types)
-            .default(0)
-            .interact()?;
-
-        match migration_types[migration_type] {
-            "Local to Cloud" => Self::local_to_cloud_migration()?,
-            "Cloud to Local" => Self::cloud_to_local_migration()?,
-            "Between Cloud Providers" => Self::cloud_to_cloud_migration()?,
-            "Version Upgrade" => Self::version_upgrade_migration()?,
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    /// Local to cloud migration
-    fn local_to_cloud_migration() -> Result<()> {
-        // Placeholder for cloud migration logic
-        println!("Preparing local environment for cloud migration...");
-        Ok(())
-    }
-
-    /// Cloud to local migration
-    fn cloud_to_local_migration() -> Result<()> {
-        // Placeholder for cloud to local migration logic
-        println!("Downloading cloud environment configuration...");
-        Ok(())
-    }
-
-    /// Cloud to cloud migration
-    fn cloud_to_cloud_migration() -> Result<()> {
-        // Placeholder for cloud provider migration logic
-        println!("Migrating between cloud providers...");
-        Ok(())
-    }
-
-    /// Version upgrade migration
-    fn version_upgrade_migration() -> Result<()> {
-        // Placeholder for version upgrade logic
-        println!("Preparing environment for version upgrade...");
-        Ok(())
     }
 }
 

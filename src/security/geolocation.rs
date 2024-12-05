@@ -1,9 +1,12 @@
 use anyhow::{Result, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use async_trait::async_trait;
 
 /// Represents a geographical region
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -43,53 +46,60 @@ pub struct GeolocationService {
     cache: Arc<RwLock<HashMap<IpAddr, GeoLocation>>>,
     
     // External IP geolocation providers
-    providers: Vec<Box<dyn GeoLocationProvider>>,
+    providers: Vec<Arc<dyn GeoLocationProvider>>,
 }
 
 /// Trait for geolocation providers
-#[async_trait::async_trait]
-pub trait GeoLocationProvider {
+#[async_trait]
+pub trait GeoLocationProvider: Send + Sync + Debug {
     /// Lookup geolocation for an IP address
     async fn lookup(&self, ip: IpAddr) -> Result<GeoLocation>;
     
     /// Provider name for logging and tracking
     fn name(&self) -> &'static str;
+    
+    /// Clone the provider
+    fn clone_provider(&self) -> Arc<dyn GeoLocationProvider>;
 }
 
 /// IP Geolocation Provider using MaxMind GeoIP database
+#[derive(Debug)]
 pub struct MaxMindGeoLocationProvider {
-    database: Arc<maxminddb::Reader<Vec<u8>>>,
+    db_path: PathBuf,
 }
 
 impl MaxMindGeoLocationProvider {
-    pub fn new(database_path: &str) -> Result<Self> {
-        let database = Arc::new(maxminddb::Reader::open_readfile(database_path)?);
-        Ok(Self { database })
+    pub fn new(db_path: PathBuf) -> Self {
+        Self { db_path }
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl GeoLocationProvider for MaxMindGeoLocationProvider {
     async fn lookup(&self, ip: IpAddr) -> Result<GeoLocation> {
         // Lookup geolocation in MaxMind database
-        let city_data: maxminddb::geoip2::City = self.database.lookup(ip)?;
+        let city_data: maxminddb::geoip2::City = maxminddb::Reader::open(&self.db_path)?.lookup(ip)?;
         
         Ok(GeoLocation {
             ip_address: ip,
-            continent: city_data.continent.and_then(|c| c.names).and_then(|n| n.get("en").cloned()),
-            country: city_data.country.and_then(|c| c.names).and_then(|n| n.get("en").cloned()),
-            state: city_data.subdivisions.first()
-                .and_then(|s| s.names.clone())
-                .and_then(|n| n.get("en").cloned()),
-            city: city_data.city.and_then(|c| c.names).and_then(|n| n.get("en").cloned()),
+            continent: city_data.continent.and_then(|c| c.names).and_then(|n| n.get("en").map(|s| s.to_string())),
+            country: city_data.country.and_then(|c| c.names).and_then(|n| n.get("en").map(|s| s.to_string())),
+            state: city_data.subdivisions.and_then(|s| s.first()).and_then(|s| s.names.as_ref()).and_then(|n| n.get("en").map(|s| s.to_string())),
+            city: city_data.city.and_then(|c| c.names).and_then(|n| n.get("en").map(|s| s.to_string())),
             latitude: city_data.location.map(|l| l.latitude).flatten(),
             longitude: city_data.location.map(|l| l.longitude).flatten(),
-            timezone: city_data.location.and_then(|l| l.time_zone),
+            timezone: city_data.location.and_then(|l| l.time_zone.map(|s| s.to_string())),
         })
     }
     
     fn name(&self) -> &'static str {
         "MaxMind GeoIP"
+    }
+    
+    fn clone_provider(&self) -> Arc<dyn GeoLocationProvider> {
+        Arc::new(MaxMindGeoLocationProvider {
+            db_path: self.db_path.clone(),
+        })
     }
 }
 
@@ -200,7 +210,7 @@ impl GeolocationAccessControlManager {
 }
 
 impl GeolocationService {
-    pub fn new(providers: Vec<Box<dyn GeoLocationProvider>>) -> Self {
+    pub fn new(providers: Vec<Arc<dyn GeoLocationProvider>>) -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
             providers,
@@ -262,11 +272,15 @@ mod tests {
             fn name(&self) -> &'static str {
                 "Mock Provider"
             }
+            
+            fn clone_provider(&self) -> Arc<dyn GeoLocationProvider> {
+                Arc::new(MockGeoLocationProvider)
+            }
         }
 
         // Create geolocation service
         let geolocation_service = GeolocationService::new(vec![
-            Box::new(MockGeoLocationProvider)
+            Arc::new(MockGeoLocationProvider)
         ]);
 
         // Create access control manager

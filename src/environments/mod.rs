@@ -282,7 +282,9 @@ impl Default for EnvironmentManager {
         // In practice, you'd want a different pattern for default initialization
         tokio::runtime::Runtime::new()
             .expect("Failed to create Tokio runtime")
-            .block_on(Self::new(Arc::new(ForgeConfig::load().await.unwrap())))
+            .block_on(async {
+                Self::new(Arc::new(ForgeConfig::load().await.unwrap())).await
+            })
             .expect("Failed to create default EnvironmentManager")
     }
 }

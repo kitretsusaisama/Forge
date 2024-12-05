@@ -4,6 +4,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
+fn default_name() -> String {
+    "default".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DevContainerConfig {
     #[serde(rename = "name", default = "default_name")]

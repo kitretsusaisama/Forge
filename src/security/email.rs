@@ -1,51 +1,55 @@
-use lettre::transport::smtp::authentication::Credentials;
-use lettre::{Message, SmtpTransport, Transport};
-use std::env;
+use lettre::{
+    transport::smtp::authentication::Credentials,
+    transport::smtp::client::{SmtpConnection, TlsParameters},
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+};
+use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
+use std::env;
+use tracing;
 
 /// Email configuration for MFA and notifications
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailConfig {
     /// SMTP server configuration
     pub smtp_host: String,
     pub smtp_port: u16,
-    
+    /// SMTP username
+    pub smtp_user: String,
+    /// SMTP password
+    pub smtp_pass: String,
     /// Sender email address
-    pub sender_email: String,
-    
-    /// Use TLS
-    pub use_tls: bool,
-    
-    /// Optional username and password for SMTP authentication
-    pub username: Option<String>,
-    pub password: Option<String>,
+    pub smtp_from: String,
 }
 
 /// Email service for sending MFA codes and notifications
 pub struct EmailService {
     config: EmailConfig,
+    mailer: AsyncSmtpTransport<Tokio1Executor>,
 }
 
 impl EmailService {
     /// Create a new email service
-    pub fn new(config: EmailConfig) -> Self {
-        Self { config }
+    pub fn new(config: EmailConfig) -> Result<Self> {
+        let creds = Credentials::new(config.smtp_user.clone(), config.smtp_pass.clone());
+
+        let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_host)?
+            .port(config.smtp_port)
+            .credentials(creds)
+            .build();
+
+        Ok(Self { config, mailer })
     }
 
     /// Send MFA code via email
-    pub fn send_mfa_code(
+    pub async fn send_mfa_code(
         &self, 
         recipient_email: &str, 
         mfa_code: &str
     ) -> Result<()> {
-        // Validate email configuration
-        if self.config.username.is_none() || self.config.password.is_none() {
-            return Err(anyhow::anyhow!("SMTP credentials not configured"));
-        }
-
         // Create email message
         let email = Message::builder()
-            .from(self.config.sender_email.parse()?)
+            .from(self.config.smtp_from.parse()?)
             .to(recipient_email.parse()?)
             .subject("Your Forge MFA Code")
             .body(format!(
@@ -54,35 +58,13 @@ impl EmailService {
                 mfa_code
             ))?;
 
-        // Create SMTP transport
-        let creds = Credentials::new(
-            self.config.username.clone().unwrap(),
-            self.config.password.clone().unwrap()
-        );
-
-        let mailer = SmtpTransport::relay(&self.config.smtp_host)?
-            .port(self.config.smtp_port)
-            .credentials(creds)
-            .build();
-
         // Send email
-        match mailer.send(&email) {
-            Ok(_) => {
-                tracing::info!(
-                    "MFA code sent to email: {}",
-                    recipient_email
-                );
-                Ok(())
-            },
-            Err(e) => {
-                tracing::error!(
-                    "Failed to send MFA code to {}: {}",
-                    recipient_email,
-                    e
-                );
-                Err(anyhow::anyhow!(e))
-            }
-        }
+        self.mailer.send(email).await?;
+        tracing::info!(
+            "MFA code sent to email: {}",
+            recipient_email
+        );
+        Ok(())
     }
 
     /// Validate email address format
@@ -138,29 +120,25 @@ impl EmailConfigManager {
         &self, 
         smtp_host: &str, 
         smtp_port: u16, 
-        sender_email: &str, 
-        username: Option<&str>, 
-        password: Option<&str>
+        smtp_user: &str, 
+        smtp_pass: &str, 
+        smtp_from: &str
     ) -> Result<EmailConfig> {
         // Validate email address
-        if !EmailService::validate_email(sender_email) {
+        if !EmailService::validate_email(smtp_from) {
             return Err(anyhow::anyhow!("Invalid sender email address"));
         }
 
         let config = EmailConfig {
             smtp_host: smtp_host.to_string(),
             smtp_port,
-            sender_email: sender_email.to_string(),
-            use_tls: true,
-            username: username.map(|s| s.to_string()),
-            password: password.map(|s| s.to_string()),
+            smtp_user: smtp_user.to_string(),
+            smtp_pass: smtp_pass.to_string(),
+            smtp_from: smtp_from.to_string(),
         };
 
         // Test email configuration
-        let email_service = EmailService::new(config.clone());
-        
-        // Optional: Add a test email sending mechanism
-        // email_service.send_test_email()?;
+        let email_service = EmailService::new(config.clone())?;
 
         // Save configuration
         self.save_config(&config)?;
@@ -189,9 +167,9 @@ mod tests {
         let config = config_manager.set_config(
             "smtp.example.com", 
             587, 
-            "sender@example.com", 
-            Some("username"), 
-            Some("password")
+            "username", 
+            "password", 
+            "sender@example.com"
         ).unwrap();
 
         // Load configuration

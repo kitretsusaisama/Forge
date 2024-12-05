@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::config::{ForgeConfig, DatabaseConfig, CloudConfig, SecurityConfig};
+use crate::config::{ForgeConfig, DatabaseConfig, SecurityConfig};
 
 pub fn mock_config() -> Arc<ForgeConfig> {
     Arc::new(ForgeConfig {
@@ -8,13 +8,6 @@ pub fn mock_config() -> Arc<ForgeConfig> {
             url: "postgres://mock:mock@localhost:5432/forge".to_string(),
             max_connections: 5,
             ssl_mode: "prefer".to_string(),
-        },
-        cloud: CloudConfig {
-            aws_access_key: "mock_aws_key".to_string(),
-            aws_secret_key: "mock_aws_secret".to_string(),
-            gcp_credentials_file: "/mock/path/to/gcp-creds.json".to_string(),
-            azure_connection_string: "mock_azure_connection".to_string(),
-            region: "us-west-2".to_string(),
         },
         security: SecurityConfig {
             encryption_key: "mock_encryption_key_32_bytes_long_key".to_string(),

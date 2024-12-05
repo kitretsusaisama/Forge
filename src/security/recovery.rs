@@ -4,7 +4,7 @@ use anyhow::{Result, Context};
 use rand::RngCore;
 use rand::rngs::OsRng;
 use serde::{Serialize, Deserialize};
-use chrono::{DateTime, Duration, TimeDelta, Utc};
+use chrono::{DateTime, Duration, Utc};
 use secrecy::{Secret, SecretString};
 use uuid::Uuid;
 
@@ -13,16 +13,16 @@ use uuid::Uuid;
 pub struct SecretRecoveryConfig {
     /// Maximum number of recovery codes allowed
     pub max_recovery_codes: usize,
-    #[serde(with = "time_delta_serde")]
     /// Validity duration for recovery codes
-    pub code_validity_duration: TimeDelta,
+    #[serde(with = "time_delta_serde")]
+    pub code_validity_duration: Duration,
 }
 
 impl Default for SecretRecoveryConfig {
     fn default() -> Self {
         Self {
             max_recovery_codes: 5,
-            code_validity_duration: Duration::days(30).to_std().unwrap(),
+            code_validity_duration: Duration::days(30),
         }
     }
 }
@@ -31,21 +31,19 @@ mod time_delta_serde {
     use super::*;
     use serde::{Deserializer, Serializer};
 
-    pub fn serialize<S>(delta: &TimeDelta, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(delta: &Duration, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         serializer.serialize_i64(delta.num_seconds())
     }
 
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<TimeDelta, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Duration, D::Error>
     where
         D: Deserializer<'de>,
     {
         let seconds = i64::deserialize(deserializer)?;
-        TimeDelta::try_seconds(seconds).ok_or_else(|| {
-            serde::de::Error::custom("Invalid duration")
-        })
+        Duration::seconds(seconds)
     }
 }
 
@@ -229,7 +227,7 @@ impl SecretRecoveryManager {
         let now = Utc::now();
         recovery_codes.retain(|code| 
             !code.used && 
-            now.signed_duration_since(code.created_at) <= self.config.code_validity_duration.to_std().unwrap()
+            now.signed_duration_since(code.created_at) <= self.config.code_validity_duration
         );
     }
 
@@ -295,7 +293,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let config = SecretRecoveryConfig {
             max_recovery_codes: 5,
-            code_validity_duration: Duration::seconds(1).to_std().unwrap(), // Very short expiration
+            code_validity_duration: Duration::seconds(1), // Very short expiration
         };
 
         let recovery_manager = SecretRecoveryManager::new(

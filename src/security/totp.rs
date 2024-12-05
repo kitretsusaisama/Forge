@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TotpConfig {
     /// Secret key for TOTP generation
-    secret_key: Vec<u8>,
+    secret_key: String,
     
     /// Issuer name (e.g., "Forge DevEnv")
     issuer: String,
@@ -17,17 +17,28 @@ pub struct TotpConfig {
     /// Account name (usually username)
     account_name: String,
     
-    /// Time step (default: 30 seconds)
-    time_step: u64,
-    
     /// Number of digits in TOTP code
     digits: usize,
+    
+    /// Time step (default: 30 seconds)
+    step: u64,
+}
+
+impl Default for TotpConfig {
+    fn default() -> Self {
+        Self {
+            secret_key: "".to_string(),
+            issuer: "Forge".to_string(),
+            account_name: "user".to_string(),
+            digits: 6,
+            step: 30,
+        }
+    }
 }
 
 /// TOTP (Time-based One-Time Password) Manager
 pub struct TotpManager {
     totp: TOTP,
-    config: TotpConfig,
 }
 
 impl TotpManager {
@@ -44,11 +55,11 @@ impl TotpManager {
         let base32_secret = encode(base32::Alphabet::RFC4648 { padding: false }, &secret_key);
 
         let config = TotpConfig {
-            secret_key,
+            secret_key: base32_secret,
             issuer: issuer.to_string(),
             account_name: account_name.to_string(),
-            time_step: 30,
             digits: 6,
+            step: 30,
         };
 
         Ok(config)
@@ -58,50 +69,40 @@ impl TotpManager {
     pub fn new(config: TotpConfig) -> Result<Self> {
         let totp = TOTP::new(
             Algorithm::SHA1,
-            6,
+            config.digits,
             1,
-            config.time_step,
-            config.secret_key.clone(),
-        )?;
+            config.step,
+            config.secret_key,
+        ).map_err(|e| anyhow::anyhow!("Failed to create TOTP: {}", e))?;
 
-        Ok(Self { totp, config })
+        Ok(Self { totp })
     }
 
-    /// Generate a TOTP QR code for authenticator apps
-    pub fn generate_qr_code(&self) -> Result<Vec<u8>> {
-        // Generate QR code URI for authenticator apps
-        let uri = self.totp.get_uri(
-            &self.config.issuer, 
-            &self.config.account_name
-        );
-
-        // Generate QR code image
-        let qr_code = qrcode::QrCode::new(&uri)?;
-        let image = qr_code.render::<qrcode::render::svg::Color>().build();
-
-        Ok(image.as_bytes().to_vec())
+    /// Get provisioning URI for TOTP
+    pub fn get_provisioning_uri(&self, issuer: &str, account_name: &str) -> String {
+        self.totp.get_provisioning_uri(issuer, account_name)
+            .unwrap_or_else(|_| String::new())
     }
 
     /// Verify a TOTP code
-    pub fn verify_code(&self, code: &str) -> bool {
-        // Allow small time drift (1 time step before/after current time)
-        self.totp.check_current_code(code)
-            .unwrap_or(false)
+    pub fn verify_code(&self, code: &str) -> Result<bool> {
+        self.totp.check_current(code)
+            .map_err(|e| anyhow::anyhow!("Failed to verify TOTP code: {}", e))
     }
 
     /// Get current TOTP code
-    pub fn get_current_code(&self) -> String {
+    pub fn generate_code(&self) -> Result<String> {
         self.totp.generate_current()
+            .map_err(|e| anyhow::anyhow!("Failed to generate TOTP code: {}", e))
     }
 
     /// Get remaining time for current code
-    pub fn get_remaining_time(&self) -> u64 {
+    pub fn time_remaining(&self) -> u64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
-        self.config.time_step - (now % self.config.time_step)
+        self.totp.step - (now % self.totp.step)
     }
 }
 
@@ -175,16 +176,16 @@ mod tests {
     #[test]
     fn test_totp_generation_and_verification() {
         let config = TotpManager::generate("Forge", "testuser").unwrap();
-        let totp_manager = TotpManager::new(config.clone()).unwrap();
+        let totp_manager = TotpManager::new(config).unwrap();
 
         // Get current code
-        let current_code = totp_manager.get_current_code();
+        let current_code = totp_manager.generate_code().unwrap();
 
         // Verify the current code
-        assert!(totp_manager.verify_code(&current_code));
+        assert!(totp_manager.verify_code(&current_code).unwrap());
 
         // Verify invalid code
-        assert!(!totp_manager.verify_code("000000"));
+        assert!(!totp_manager.verify_code("000000").unwrap());
     }
 
     #[test]

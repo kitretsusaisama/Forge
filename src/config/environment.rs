@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// Development Environment Configuration
+/// Development Environment Configurations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DevEnvironmentConfig {
     /// Unique environment identifier

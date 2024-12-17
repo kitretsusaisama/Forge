@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -9,13 +9,13 @@ use uuid::Uuid;
 pub struct DistributedTracingConfig {
     /// Enable/disable tracing
     pub enabled: bool,
-    
+
     /// Sampling rate
     pub sampling_rate: f32,
-    
+
     /// Maximum trace duration
     pub max_trace_duration: Duration,
-    
+
     /// Trace storage configuration
     pub storage: TraceStorageConfig,
 }
@@ -25,10 +25,10 @@ pub struct DistributedTracingConfig {
 pub struct TraceStorageConfig {
     /// Storage type
     pub storage_type: StorageType,
-    
+
     /// Maximum number of traces to store
     pub max_traces: usize,
-    
+
     /// Retention period for traces
     pub retention_period: Duration,
 }
@@ -45,10 +45,10 @@ pub enum StorageType {
 pub struct DistributedTracer {
     /// Configuration
     config: DistributedTracingConfig,
-    
+
     /// Active traces
     active_traces: HashMap<Uuid, Trace>,
-    
+
     /// Completed traces
     completed_traces: Vec<Trace>,
 }
@@ -58,22 +58,22 @@ pub struct DistributedTracer {
 pub struct Trace {
     /// Unique trace ID
     pub id: Uuid,
-    
+
     /// Parent trace ID (if this is a child trace)
     pub parent_trace_id: Option<Uuid>,
-    
+
     /// Trace name or description
     pub name: String,
-    
+
     /// Trace start time
     pub start_time: Instant,
-    
+
     /// Trace end time
     pub end_time: Option<Instant>,
-    
+
     /// Trace spans
     pub spans: Vec<TraceSpan>,
-    
+
     /// Trace metadata
     pub metadata: HashMap<String, String>,
 }
@@ -83,19 +83,19 @@ pub struct Trace {
 pub struct TraceSpan {
     /// Span ID
     pub id: Uuid,
-    
+
     /// Span name
     pub name: String,
-    
+
     /// Start time of the span
     pub start_time: Instant,
-    
+
     /// End time of the span
     pub end_time: Option<Instant>,
-    
+
     /// Span attributes
     pub attributes: HashMap<String, String>,
-    
+
     /// Span events
     pub events: Vec<SpanEvent>,
 }
@@ -105,10 +105,10 @@ pub struct TraceSpan {
 pub struct SpanEvent {
     /// Event name
     pub name: String,
-    
+
     /// Event timestamp
     pub timestamp: Instant,
-    
+
     /// Event attributes
     pub attributes: HashMap<String, String>,
 }
@@ -126,7 +126,7 @@ impl DistributedTracer {
     /// Start a new trace
     pub fn start_trace(&mut self, name: &str, parent_trace_id: Option<Uuid>) -> Uuid {
         let trace_id = Uuid::new_v4();
-        
+
         let trace = Trace {
             id: trace_id,
             parent_trace_id,
@@ -136,18 +136,18 @@ impl DistributedTracer {
             spans: Vec::new(),
             metadata: HashMap::new(),
         };
-        
+
         self.active_traces.insert(trace_id, trace);
-        
+
         trace_id
     }
 
     /// Start a new span within a trace
     pub fn start_span(&mut self, trace_id: Uuid, name: &str) -> Option<Uuid> {
         let trace = self.active_traces.get_mut(&trace_id)?;
-        
+
         let span_id = Uuid::new_v4();
-        
+
         let span = TraceSpan {
             id: span_id,
             name: name.to_string(),
@@ -156,33 +156,39 @@ impl DistributedTracer {
             attributes: HashMap::new(),
             events: Vec::new(),
         };
-        
+
         trace.spans.push(span);
-        
+
         Some(span_id)
     }
 
     /// End a span within a trace
     pub fn end_span(&mut self, trace_id: Uuid, span_id: Uuid) -> Result<()> {
-        let trace = self.active_traces.get_mut(&trace_id)
+        let trace = self
+            .active_traces
+            .get_mut(&trace_id)
             .context("Trace not found")?;
-        
-        let span = trace.spans.iter_mut()
+
+        let span = trace
+            .spans
+            .iter_mut()
             .find(|s| s.id == span_id)
             .context("Span not found")?;
-        
+
         span.end_time = Some(Instant::now());
-        
+
         Ok(())
     }
 
     /// End a trace
     pub fn end_trace(&mut self, trace_id: Uuid) -> Result<()> {
-        let mut trace = self.active_traces.remove(&trace_id)
+        let mut trace = self
+            .active_traces
+            .remove(&trace_id)
             .context("Trace not found")?;
-        
+
         trace.end_time = Some(Instant::now());
-        
+
         // Check trace duration
         if let Some(end_time) = trace.end_time {
             let duration = end_time.duration_since(trace.start_time);
@@ -190,10 +196,10 @@ impl DistributedTracer {
                 // Log or handle long-running traces
             }
         }
-        
+
         // Store completed trace
         self.store_trace(trace);
-        
+
         Ok(())
     }
 
@@ -211,27 +217,31 @@ impl DistributedTracer {
 
     /// Add event to a span
     pub fn add_span_event(
-        &mut self, 
-        trace_id: Uuid, 
-        span_id: Uuid, 
-        event_name: &str, 
-        attributes: HashMap<String, String>
+        &mut self,
+        trace_id: Uuid,
+        span_id: Uuid,
+        event_name: &str,
+        attributes: HashMap<String, String>,
     ) -> Result<()> {
-        let trace = self.active_traces.get_mut(&trace_id)
+        let trace = self
+            .active_traces
+            .get_mut(&trace_id)
             .context("Trace not found")?;
-        
-        let span = trace.spans.iter_mut()
+
+        let span = trace
+            .spans
+            .iter_mut()
             .find(|s| s.id == span_id)
             .context("Span not found")?;
-        
+
         let event = SpanEvent {
             name: event_name.to_string(),
             timestamp: Instant::now(),
             attributes,
         };
-        
+
         span.events.push(event);
-        
+
         Ok(())
     }
 
@@ -247,9 +257,11 @@ impl DistributedTracer {
         for trace in &self.completed_traces {
             if let (Some(start), Some(end)) = (trace.start_time, trace.end_time) {
                 let total_duration = end.duration_since(start);
-                
+
                 // Analyze span durations
-                let slow_spans: Vec<_> = trace.spans.iter()
+                let slow_spans: Vec<_> = trace
+                    .spans
+                    .iter()
                     .filter_map(|span| {
                         span.end_time.map(|end_time| {
                             let span_duration = end_time.duration_since(span.start_time);
@@ -263,7 +275,8 @@ impl DistributedTracer {
                     insights.push(TracePerformanceInsight {
                         trace_id: trace.id,
                         total_duration,
-                        slow_spans: slow_spans.into_iter()
+                        slow_spans: slow_spans
+                            .into_iter()
                             .map(|(span, duration)| (span.name.clone(), duration))
                             .collect(),
                     });
@@ -280,10 +293,10 @@ impl DistributedTracer {
 pub struct TracePerformanceInsight {
     /// Trace ID
     pub trace_id: Uuid,
-    
+
     /// Total trace duration
     pub total_duration: Duration,
-    
+
     /// Slow spans with their durations
     pub slow_spans: Vec<(String, Duration)>,
 }
@@ -318,12 +331,14 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
 
         // Add an event
-        tracer.add_span_event(
-            trace_id, 
-            span_id, 
-            "processing", 
-            HashMap::from([("key".to_string(), "value".to_string())])
-        ).unwrap();
+        tracer
+            .add_span_event(
+                trace_id,
+                span_id,
+                "processing",
+                HashMap::from([("key".to_string(), "value".to_string())]),
+            )
+            .unwrap();
 
         // End span
         tracer.end_span(trace_id, span_id).unwrap();

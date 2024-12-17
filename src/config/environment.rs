@@ -1,11 +1,11 @@
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::fs;
-use serde::{Serialize, Deserialize};
-use anyhow::{Result, Context};
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// Development Environment Configuration
+/// Development Environment Configurations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DevEnvironmentConfig {
     /// Unique environment identifier
@@ -186,7 +186,9 @@ impl EnvironmentManager {
             let lang_dir = match lang {
                 ProgrammingLanguage::Rust => env_dir.join("src"),
                 ProgrammingLanguage::Python => env_dir.join("python"),
-                ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => env_dir.join("js"),
+                ProgrammingLanguage::JavaScript | ProgrammingLanguage::TypeScript => {
+                    env_dir.join("js")
+                }
                 ProgrammingLanguage::Go => env_dir.join("go"),
                 ProgrammingLanguage::Java => env_dir.join("java"),
                 ProgrammingLanguage::Other(name) => env_dir.join(name.to_lowercase()),
@@ -208,14 +210,14 @@ impl EnvironmentManager {
                         .arg("init")
                         .current_dir(&config.project_root)
                         .status()?;
-                },
+                }
                 PackageManager::Pip => {
                     // Create Python virtual environment
                     std::process::Command::new("python")
                         .args(&["-m", "venv", ".venv"])
                         .current_dir(&config.project_root)
                         .status()?;
-                },
+                }
                 // Add more package manager initializations
                 _ => {}
             }
@@ -227,26 +229,22 @@ impl EnvironmentManager {
     /// Configure IDE settings
     fn configure_ide(&self, config: &DevEnvironmentConfig) -> Result<()> {
         for ide_config in &config.ide_configs {
-            match ide_config.ide {
-                IDEType::VSCode => {
-                    // Generate VS Code workspace settings
-                    let vscode_dir = config.project_root.join(".vscode");
-                    fs::create_dir_all(&vscode_dir)?;
+            if let IDEType::VSCode = ide_config.ide {
+                // Generate VS Code workspace settings
+                let vscode_dir = config.project_root.join(".vscode");
+                fs::create_dir_all(&vscode_dir)?;
 
-                    // Example: Generate settings.json
-                    let settings = serde_json::json!({
-                        "rust-analyzer.linkedProjects": [
-                            "./Cargo.toml"
-                        ]
-                    });
+                // Example: Generate settings.json
+                let settings = serde_json::json!({
+                    "rust-analyzer.linkedProjects": [
+                        "./Cargo.toml"
+                    ]
+                });
 
-                    fs::write(
-                        vscode_dir.join("settings.json"), 
-                        serde_json::to_string_pretty(&settings)?
-                    )?;
-                },
-                // Add more IDE configurations
-                _ => {}
+                fs::write(
+                    vscode_dir.join("settings.json"),
+                    serde_json::to_string_pretty(&settings)?,
+                )?;
             }
         }
 
@@ -274,7 +272,7 @@ impl EnvironmentManager {
     /// Delete an environment
     pub fn delete_environment(&self, env_name: &str) -> Result<()> {
         let env_dir = self.base_dir.join(env_name);
-        
+
         if env_dir.exists() {
             fs::remove_dir_all(env_dir)?;
         }
@@ -331,7 +329,10 @@ mod tests {
 
         // Verify environment creation
         assert!(temp_dir.path().join("test-project").exists());
-        assert!(temp_dir.path().join("test-project/dem_config.json").exists());
+        assert!(temp_dir
+            .path()
+            .join("test-project/dem_config.json")
+            .exists());
         assert!(temp_dir.path().join("test-project/src").exists());
         assert!(temp_dir.path().join("test-project/python").exists());
     }

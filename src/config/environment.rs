@@ -227,26 +227,22 @@ impl EnvironmentManager {
     /// Configure IDE settings
     fn configure_ide(&self, config: &DevEnvironmentConfig) -> Result<()> {
         for ide_config in &config.ide_configs {
-            match ide_config.ide {
-                IDEType::VSCode => {
-                    // Generate VS Code workspace settings
-                    let vscode_dir = config.project_root.join(".vscode");
-                    fs::create_dir_all(&vscode_dir)?;
+            if let IDEType::VSCode = ide_config.ide {
+                // Generate VS Code workspace settings
+                let vscode_dir = config.project_root.join(".vscode");
+                fs::create_dir_all(&vscode_dir)?;
 
-                    // Example: Generate settings.json
-                    let settings = serde_json::json!({
-                        "rust-analyzer.linkedProjects": [
-                            "./Cargo.toml"
-                        ]
-                    });
+                // Example: Generate settings.json
+                let settings = serde_json::json!({
+                    "rust-analyzer.linkedProjects": [
+                        "./Cargo.toml"
+                    ]
+                });
 
-                    fs::write(
-                        vscode_dir.join("settings.json"), 
-                        serde_json::to_string_pretty(&settings)?
-                    )?;
-                },
-                // Add more IDE configurations
-                _ => {}
+                fs::write(
+                    vscode_dir.join("settings.json"), 
+                    serde_json::to_string_pretty(&settings)?
+                )?;
             }
         }
 

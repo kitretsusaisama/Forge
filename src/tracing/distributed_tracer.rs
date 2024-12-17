@@ -200,16 +200,12 @@ impl DistributedTracer {
     /// Store completed trace
     fn store_trace(&mut self, trace: Trace) {
         // Manage trace storage based on configuration
-        match self.config.storage.storage_type {
-            StorageType::InMemory => {
-                // Keep only the most recent traces
-                if self.completed_traces.len() >= self.config.storage.max_traces {
-                    self.completed_traces.remove(0);
-                }
-                self.completed_traces.push(trace);
-            },
-            // Additional storage types can be implemented
-            _ => {}
+        if let StorageType::InMemory = self.config.storage.storage_type {
+            // Keep only the most recent traces
+            if self.completed_traces.len() >= self.config.storage.max_traces {
+                self.completed_traces.remove(0);
+            }
+            self.completed_traces.push(trace);
         }
     }
 

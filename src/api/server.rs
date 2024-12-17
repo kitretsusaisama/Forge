@@ -215,17 +215,17 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
             "Not Found",
             warp::http::StatusCode::NOT_FOUND,
         ))
-    } else if let Some(_) = err.find::<TemplateGenerationError>() {
+    } else if err.find::<TemplateGenerationError>().is_some() {
         Ok(warp::reply::with_status(
             "Template Generation Failed",
             warp::http::StatusCode::BAD_REQUEST,
         ))
-    } else if let Some(_) = err.find::<AgentExecutionError>() {
+    } else if err.find::<AgentExecutionError>().is_some() {
         Ok(warp::reply::with_status(
             "Agent Execution Failed",
             warp::http::StatusCode::INTERNAL_SERVER_ERROR,
         ))
-    } else if let Some(_) = err.find::<EndpointRegistrationError>() {
+    } else if err.find::<EndpointRegistrationError>().is_some() {
         Ok(warp::reply::with_status(
             "Endpoint Registration Failed",
             warp::http::StatusCode::BAD_REQUEST,

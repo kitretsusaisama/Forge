@@ -1,14 +1,14 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use warp::{Filter, Reply, Rejection};
-use tracing::{info, error};
+use tracing::{error, info};
+use warp::{Filter, Rejection, Reply};
 
+use crate::agents::AgentOrchestrator;
 use crate::api::APIManager;
 use crate::templates::TemplateManager;
-use crate::agents::AgentOrchestrator;
 
 /// Comprehensive API Server Configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ pub struct ForgeAPIServer {
 impl ForgeAPIServer {
     /// Create a new API server
     pub fn new(
-        config: APIServerConfig, 
+        config: APIServerConfig,
         api_manager: APIManager,
         template_manager: TemplateManager,
         agent_orchestrator: AgentOrchestrator,
@@ -76,8 +76,7 @@ impl ForgeAPIServer {
     /// Create API routes
     fn create_routes(&self) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
         // Template Management Routes
-        let template_routes = self.template_routes()
-            .or(self.environment_routes());
+        let template_routes = self.template_routes().or(self.environment_routes());
 
         // Agent Management Routes
         let agent_routes = self.agent_routes();
@@ -86,9 +85,7 @@ impl ForgeAPIServer {
         let api_routes = self.api_endpoint_routes();
 
         // Combine all routes
-        template_routes
-            .or(agent_routes)
-            .or(api_routes)
+        template_routes.or(agent_routes).or(api_routes)
     }
 
     /// Template-related routes
@@ -96,16 +93,14 @@ impl ForgeAPIServer {
         let template_manager = Arc::clone(&self.template_manager);
 
         // GET /templates
-        let list_templates = warp::path("templates")
-            .and(warp::get())
-            .and_then(move || {
-                let template_manager = Arc::clone(&template_manager);
-                async move {
-                    let manager = template_manager.lock().await;
-                    // Implement method to list templates
-                    Ok::<_, Rejection>(warp::reply::json(&manager.list_templates()))
-                }
-            });
+        let list_templates = warp::path("templates").and(warp::get()).and_then(move || {
+            let template_manager = Arc::clone(&template_manager);
+            async move {
+                let manager = template_manager.lock().await;
+                // Implement method to list templates
+                Ok::<_, Rejection>(warp::reply::json(&manager.list_templates()))
+            }
+        });
 
         // POST /templates/generate
         let generate_template = warp::path("templates")
@@ -117,7 +112,8 @@ impl ForgeAPIServer {
                 async move {
                     let mut manager = template_manager.lock().await;
                     // Implement template generation logic
-                    let template = manager.generate_template(&template_config)
+                    let template = manager
+                        .generate_template(&template_config)
                         .map_err(|_| warp::reject::custom(TemplateGenerationError))?;
                     Ok::<_, Rejection>(warp::reply::json(&template))
                 }
@@ -146,7 +142,8 @@ impl ForgeAPIServer {
                 let agent_orchestrator = Arc::clone(&agent_orchestrator);
                 async move {
                     let orchestrator = agent_orchestrator.lock().await;
-                    let results = orchestrator.execute_all()
+                    let results = orchestrator
+                        .execute_all()
                         .await
                         .map_err(|_| warp::reject::custom(AgentExecutionError))?;
                     Ok::<_, Rejection>(warp::reply::json(&results))
@@ -168,12 +165,13 @@ impl ForgeAPIServer {
                 let api_manager = Arc::clone(&api_manager);
                 async move {
                     let mut manager = api_manager.lock().await;
-                    manager.register_endpoint(endpoint)
+                    manager
+                        .register_endpoint(endpoint)
                         .await
                         .map_err(|_| warp::reject::custom(EndpointRegistrationError))?;
                     Ok::<_, Rejection>(warp::reply::with_status(
-                        "Endpoint registered successfully", 
-                        warp::http::StatusCode::CREATED
+                        "Endpoint registered successfully",
+                        warp::http::StatusCode::CREATED,
                     ))
                 }
             });
@@ -215,17 +213,17 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
             "Not Found",
             warp::http::StatusCode::NOT_FOUND,
         ))
-    } else if let Some(_) = err.find::<TemplateGenerationError>() {
+    } else if err.find::<TemplateGenerationError>().is_some() {
         Ok(warp::reply::with_status(
             "Template Generation Failed",
             warp::http::StatusCode::BAD_REQUEST,
         ))
-    } else if let Some(_) = err.find::<AgentExecutionError>() {
+    } else if err.find::<AgentExecutionError>().is_some() {
         Ok(warp::reply::with_status(
             "Agent Execution Failed",
             warp::http::StatusCode::INTERNAL_SERVER_ERROR,
         ))
-    } else if let Some(_) = err.find::<EndpointRegistrationError>() {
+    } else if err.find::<EndpointRegistrationError>().is_some() {
         Ok(warp::reply::with_status(
             "Endpoint Registration Failed",
             warp::http::StatusCode::BAD_REQUEST,
@@ -237,12 +235,11 @@ async fn handle_rejection(err: Rejection) -> Result<impl Reply, Rejection> {
 
 /// Performance Optimization Middleware
 fn performance_middleware() -> impl Filter<Extract = (), Error = Rejection> + Clone {
-    warp::any()
-        .map(|| {
-            // Add performance tracking logic
-            // Could integrate with tracing or custom metrics
-            info!("Request processed");
-        })
+    warp::any().map(|| {
+        // Add performance tracking logic
+        // Could integrate with tracing or custom metrics
+        info!("Request processed");
+    })
 }
 
 #[cfg(test)]
@@ -264,10 +261,10 @@ mod tests {
         };
 
         let server = ForgeAPIServer::new(
-            server_config, 
-            api_manager, 
-            template_manager, 
-            agent_orchestrator
+            server_config,
+            api_manager,
+            template_manager,
+            agent_orchestrator,
         );
 
         let routes = server.create_routes();

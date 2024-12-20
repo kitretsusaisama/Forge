@@ -1,0 +1,86 @@
+name: Label Management
+
+on:
+  workflow_dispatch: # Trigger the workflow manually
+
+jobs:
+  label-management:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: Load Configuration
+        id: labels
+        run: |
+          # Define advanced label configurations with detailed descriptions
+          echo '{
+            "labels": [
+              {"name": "Priority: Blocker", "color": "FF0000", "description": "Critical issues that need immediate resolution."},
+              {"name": "Priority: High", "color": "FFA500", "description": "Major tasks that significantly impact the project."},
+              {"name": "Priority: Medium", "color": "FFFF00", "description": "Important but not urgent tasks."},
+              {"name": "Priority: Low", "color": "00FF00", "description": "Minor enhancements or backlog items."},
+              {"name": "Bug: Critical", "color": "8B0000", "description": "Security vulnerabilities or core functionality issues."},
+              {"name": "Bug: Minor", "color": "FF69B4", "description": "Non-critical or cosmetic issues."},
+              {"name": "Enhancement", "color": "4682B4", "description": "Feature requests or improvements."},
+              {"name": "Documentation", "color": "ADD8E6", "description": "Tasks related to documentation updates or fixes."},
+              {"name": "Help Wanted", "color": "9400D3", "description": "Tasks open for contribution by the community."},
+              {"name": "Needs Review", "color": "FFD700", "description": "Issues or PRs awaiting peer review."},
+              {"name": "Ready for Merge", "color": "32CD32", "description": "Approved and ready to merge into the main branch."},
+              {"name": "In Progress", "color": "1E90FF", "description": "Work actively being done."},
+              {"name": "Blocked", "color": "DC143C", "description": "Issues that cannot proceed due to dependencies."},
+              {"name": "Discussion", "color": "20B2AA", "description": "Topics or ideas under discussion."}
+            ]
+          }' > labels.json
+
+      - name: Process Labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Extract the labels from the JSON file
+          jq -c '.labels[]' labels.json | while read -r label; do
+            NAME=$(echo "$label" | jq -r '.name')
+            COLOR=$(echo "$label" | jq -r '.color')
+            DESCRIPTION=$(echo "$label" | jq -r '.description')
+
+            # Check if the label already exists
+            RESPONSE=$(curl -s -o response.json -w "%{http_code}" \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/labels/$NAME")
+
+            if [ "$RESPONSE" -eq 200 ]; then
+              # Label exists, update it
+              echo "Updating existing label: $NAME"
+              curl -X PATCH \
+                -H "Authorization: token $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/labels/$NAME" \
+                -d "{\"name\":\"$NAME\", \"color\":\"$COLOR\", \"description\":\"$DESCRIPTION\"}"
+            else
+              # Label does not exist, create it
+              echo "Creating new label: $NAME"
+              curl -X POST \
+                -H "Authorization: token $GITHUB_TOKEN" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/labels" \
+                -d "{\"name\":\"$NAME\", \"color\":\"$COLOR\", \"description\":\"$DESCRIPTION\"}"
+            fi
+          done
+
+      - name: Log Results
+        run: |
+          echo "Labels processed successfully."
+          cat response.json
+
+      - name: Rollback on Failure
+        if: failure()
+        run: |
+          echo "An error occurred. Rolling back changes."
+          # Add rollback logic or cleanup actions if needed
